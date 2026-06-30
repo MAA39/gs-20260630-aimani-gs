@@ -2,6 +2,7 @@ export {
   getUserRole,
   listVisibleConsultations,
   getConsultationDetail,
+  getSharedReport,
   updateConsultationStatus,
   normalizeVisibility,
 } from './queries.ts';
