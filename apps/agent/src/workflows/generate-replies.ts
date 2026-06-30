@@ -1,29 +1,58 @@
 import type { FlueContext, WorkflowRouteHandler } from '@flue/runtime';
 
 const DEFAULT_MODEL = '@cf/openai/gpt-oss-120b';
-const REPLY_COUNT = 3;
 const TIMEOUT_MS = 45_000;
+const MIN_QUESTION_COUNT = 1;
+const MAX_QUESTION_COUNT = 3;
+const MIN_OPTION_COUNT = 3;
+const MAX_OPTION_COUNT = 4;
+const MAX_QUESTION_LENGTH = 160;
+const MAX_OPTION_LENGTH = 80;
+const MAX_TURN_BODY_LENGTH = 12_000;
 
-const MIN_RESPONSES = 1;
-const MAX_RESPONSES = 5;
-const MIN_RESPONSE_LENGTH = 1;
-const MAX_RESPONSE_LENGTH = 500;
-
-const FALLBACK_RESPONSES = [
-  '少し整理しきれませんでした。まず「何に一番時間を使っているか」と「どこで止まっているか」だけ短く書いてみると、次の相談にしやすくなります。',
-];
+const FALLBACK_TURN: SessionTurnOutput = {
+  quote_span: '困っていること',
+  response_text: 'いまの材料だけだと少し拾いきれなかったので、まずは詰まっている場面を小さく分けて確認します。',
+  questions: [
+    {
+      question: 'いま一番近いのはどれですか？',
+      options: ['何から手をつけるか迷っている', '誰に聞けばいいか迷っている', '状況を説明する言葉がまだない'],
+    },
+  ],
+};
 
 const SYSTEM_PROMPT = `あなたはG's Academyの受講生の相談を支援するAIです。
 
-以下のルールを守ってください:
-- 判断や説教をしない。答えを出さない
-- 困りごとを具体的な問いで引き出す（「最近一番時間を使ったことは？」等）
-- 感情を否定しない。事実と解釈を分けて整理する
+役割:
+- 受講生の困りごとを、質問と選択肢で引き出す
+- 認識を整理し、可能性を並べる
+- 判断や説教はしない。答えを出さない
 - 材料を並べて、本人が自分の言葉を掴むのを手伝う
-- 「誰に相談すればいいか」の候補を材料として並べる（チューター/メンター/同期/外部）
+- 誰に相談すればいいかの候補を材料として並べる（チューター/メンター/同期/外部）
 - 最後に選ぶのは本人。AIは決めない
 
-出力形式: {"responses":["応答1","応答2","応答3"]}`;
+対話の進め方:
+- 初手は答えやすい具体的な問いから入る
+- 受講生の言葉をquote_spanでそのまま引用する
+- response_textでは、本人の発話を踏まえて認識を整理し、可能性を並べる
+- 1ターンに2〜3個まで質問を出してよい
+- 各質問に3〜4個の選択肢を付ける
+- 10ターン前後に見えたら、続ける選択肢と整理へ進む選択肢の両方を出す
+
+禁止:
+- 判断・説教・答えの提示
+- 安易な励まし
+- 感情の断定
+- プロダクト固有の禁止語の使用
+
+出力形式（厳守。JSON以外の出力は禁止）:
+{
+  "quote_span": "受講生の言葉をそのまま引用",
+  "response_text": "認識の整理と可能性の提示",
+  "questions": [
+    {"question": "質問文", "options": ["選択肢1", "選択肢2", "選択肢3"]}
+  ]
+}`;
 
 type DispatchPayload = {
   aiRunId: string;
@@ -62,10 +91,19 @@ type Env = {
   INTERNAL_CALLBACK_KEY?: string;
 };
 
-type ResponseBundle = { responses: string[] };
+type QuestionWithOptions = {
+  question: string;
+  options: string[];
+};
+
+type SessionTurnOutput = {
+  quote_span: string;
+  response_text: string;
+  questions: QuestionWithOptions[];
+};
 
 type RunResult = {
-  responsesCount: number;
+  turnCreated: true;
   model: { provider: 'workers-ai'; id: string };
   usage: { input: number; output: number };
 };
@@ -103,21 +141,19 @@ export async function run({ payload, env }: FlueContext<unknown, Env>): Promise<
     let aiResult = await runWorkersAi(env.AI, DEFAULT_MODEL, buildPrompt(input));
     lastModel = aiResult.model;
     accumulateUsage(totalUsage, aiResult.usage);
-    let decoded = decodeResponses(aiResult.text);
+    let decoded = decodeSessionTurnOutput(aiResult.text);
 
     if (!decoded.ok) {
       await callbackToApi(env.API, input.aiRunId, 'repairing', callbackKey);
       aiResult = await runWorkersAi(env.AI, DEFAULT_MODEL, buildRepairPrompt(decoded.issues, aiResult.text));
       lastModel = aiResult.model;
       accumulateUsage(totalUsage, aiResult.usage);
-      decoded = decodeResponses(aiResult.text);
+      decoded = decodeSessionTurnOutput(aiResult.text);
     }
 
-    if (!decoded.ok) {
-      decoded = { ok: true, value: { responses: FALLBACK_RESPONSES } };
-    }
-
-    const resultHash = await computeHash(JSON.stringify(decoded.value.responses));
+    const turnOutput = decoded.ok ? decoded.value : FALLBACK_TURN;
+    const messageBody = JSON.stringify(turnOutput);
+    const resultHash = await computeHash(messageBody);
 
     await callbackToApi(env.API, input.aiRunId, 'complete', callbackKey, {
       protocolVersion: '1',
@@ -126,7 +162,7 @@ export async function run({ payload, env }: FlueContext<unknown, Env>): Promise<
       promptVersion: input.context.promptVersion,
       model: lastModel,
       resultHash,
-      replies: decoded.value.responses.map((body) => ({ body })),
+      messages: [{ body: messageBody }],
       usage: {
         inputTokens: totalUsage.input,
         outputTokens: totalUsage.output,
@@ -136,7 +172,7 @@ export async function run({ payload, env }: FlueContext<unknown, Env>): Promise<
     });
 
     return {
-      responsesCount: decoded.value.responses.length,
+      turnCreated: true,
       model: { provider: 'workers-ai', id: lastModel },
       usage: { input: totalUsage.input, output: totalUsage.output },
     };
@@ -158,7 +194,7 @@ async function callbackToApi(
   callbackKey: string,
   body?: Record<string, unknown>,
 ): Promise<void> {
-  const response = await api.fetch(
+  const apiResponse = await api.fetch(
     new Request(`http://api/internal/v1/ai-runs/${aiRunId}/${action}`, {
       method: 'POST',
       headers: {
@@ -170,29 +206,29 @@ async function callbackToApi(
   );
 
   try {
-    if (!response.ok) {
+    if (!apiResponse.ok) {
       throw new SafeWorkflowError(
         action === 'fail' ? 'AI_RUN_FAILED' : `AI_CALLBACK_${action.toUpperCase()}_FAILED`,
       );
     }
   } finally {
-    await response.body?.cancel().catch(() => undefined);
+    await apiResponse.body?.cancel().catch(() => undefined);
   }
 }
 
 function buildPrompt(input: DispatchPayload): string {
   const ctx = input.context;
   const history = ctx.recentMessages
-    .map((m) => `${m.messageNumber}. ${formatAuthor(m.authorType)}: ${m.body}`)
+    .map((m) => `${m.messageNumber}. ${formatAuthor(m.authorType)}: ${formatMessageBody(m.body, m.authorType)}`)
     .join('\n');
+  const humanTurns = ctx.recentMessages.filter((m) => m.authorType !== 'ai').length + 1;
 
   return [
     `相談タイトル: ${ctx.consultation.title}`,
-    `公開範囲: ${ctx.consultation.visibility}`,
-    history ? `これまでの流れ:\n${history}` : 'これまでの流れ: まだありません',
-    `今回整理したい内容: ${ctx.sourceMessage.body}`,
-    `応答を${ctx.replyCount || REPLY_COUNT}件返してください。`,
-    '各応答は、本人が次に書きやすくなる短い材料・問い・整理だけにしてください。',
+    history ? `これまでの対話:\n${history}` : 'これまでの対話: まだありません',
+    `今回のメッセージ: ${ctx.sourceMessage.body}`,
+    `現在の受講生ターン数: ${humanTurns}`,
+    '上記を踏まえて、認識を整理し、次に話しやすくなる質問と選択肢を出してください。',
   ].join('\n\n');
 }
 
@@ -200,7 +236,7 @@ function buildRepairPrompt(issues: string[], output: string): string {
   return [
     '直前の出力を契約に合わせて修正してください。説明は書かず、JSONオブジェクトだけを返してください。',
     `問題: ${issues.join('; ')}`,
-    '{"responses":["応答1","応答2","応答3"]}',
+    '{"quote_span":"受講生の言葉","response_text":"認識の整理と可能性の提示","questions":[{"question":"質問文","options":["選択肢1","選択肢2","選択肢3"]}]}',
     output,
   ].join('\n\n');
 }
@@ -210,7 +246,7 @@ async function runWorkersAi(ai: WorkersAiBinding, model: string, prompt: string)
   text: string;
   usage: Partial<{ input: number; output: number; cacheRead: number; cacheWrite: number }>;
 }> {
-  const result = await withTimeout(
+  const aiResult = await withTimeout(
     ai.run(model, {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -222,13 +258,13 @@ async function runWorkersAi(ai: WorkersAiBinding, model: string, prompt: string)
 
   return {
     model,
-    text: extractText(result),
-    usage: extractUsage(result),
+    text: extractText(aiResult),
+    usage: extractUsage(aiResult),
   };
 }
 
-function decodeResponses(textValue: string):
-  | { ok: true; value: ResponseBundle }
+function decodeSessionTurnOutput(textValue: string):
+  | { ok: true; value: SessionTurnOutput }
   | { ok: false; issues: string[] } {
   let value: unknown;
   try {
@@ -238,27 +274,44 @@ function decodeResponses(textValue: string):
   }
   if (!isRecord(value)) return { ok: false, issues: ['JSON object required'] };
 
-  const rawResponses = Array.isArray(value.responses)
-    ? value.responses
-    : Array.isArray(value.replies)
-      ? value.replies
-      : null;
-  if (!rawResponses) return { ok: false, issues: ['responses array required'] };
-
   const issues: string[] = [];
-  if (rawResponses.length < MIN_RESPONSES || rawResponses.length > MAX_RESPONSES) {
-    issues.push(`expected ${MIN_RESPONSES}-${MAX_RESPONSES} responses`);
+  const quoteSpan = typeof value.quote_span === 'string' ? value.quote_span.trim() : '';
+  const responseText = typeof value.response_text === 'string' ? value.response_text.trim() : '';
+  const rawQuestions = Array.isArray(value.questions) ? value.questions : [];
+
+  if (!quoteSpan) issues.push('quote_span required');
+  if (!responseText) issues.push('response_text required');
+  if (rawQuestions.length < MIN_QUESTION_COUNT || rawQuestions.length > MAX_QUESTION_COUNT) {
+    issues.push(`questions length must be ${MIN_QUESTION_COUNT}-${MAX_QUESTION_COUNT}`);
   }
 
-  const responses = rawResponses
-    .filter((r): r is string => typeof r === 'string')
-    .map((r) => r.trim());
-  if (responses.length !== rawResponses.length) issues.push('all responses must be strings');
-  if (responses.some((r) => r.length < MIN_RESPONSE_LENGTH || r.length > MAX_RESPONSE_LENGTH)) {
-    issues.push(`response length must be ${MIN_RESPONSE_LENGTH}-${MAX_RESPONSE_LENGTH}`);
+  const questions: QuestionWithOptions[] = [];
+  for (const rawQuestion of rawQuestions) {
+    if (!isRecord(rawQuestion)) {
+      issues.push('each question must be an object');
+      continue;
+    }
+    const question = typeof rawQuestion.question === 'string' ? rawQuestion.question.trim() : '';
+    const rawOptions = Array.isArray(rawQuestion.options) ? rawQuestion.options : [];
+    const options = rawOptions
+      .filter((option): option is string => typeof option === 'string')
+      .map((option) => option.trim())
+      .filter(Boolean);
+
+    if (!question) issues.push('question text required');
+    if (question.length > MAX_QUESTION_LENGTH) issues.push('question text too long');
+    if (options.length !== rawOptions.length) issues.push('all options must be strings');
+    if (options.length < MIN_OPTION_COUNT || options.length > MAX_OPTION_COUNT) {
+      issues.push(`options length must be ${MIN_OPTION_COUNT}-${MAX_OPTION_COUNT}`);
+    }
+    if (options.some((option) => option.length > MAX_OPTION_LENGTH)) issues.push('option text too long');
+    questions.push({ question, options });
   }
+
+  const normalized: SessionTurnOutput = { quote_span: quoteSpan, response_text: responseText, questions };
+  if (JSON.stringify(normalized).length > MAX_TURN_BODY_LENGTH) issues.push('turn body too long');
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, value: { responses } };
+  return { ok: true, value: normalized };
 }
 
 function parsePayload(value: unknown): DispatchPayload {
@@ -340,6 +393,19 @@ function accumulateUsage(
   total.output += nonNegative(usage.output);
   total.cacheRead += nonNegative(usage.cacheRead);
   total.cacheWrite += nonNegative(usage.cacheWrite);
+}
+
+function formatMessageBody(body: string, authorType: string): string {
+  if (authorType !== 'ai') return body;
+  try {
+    const parsed = JSON.parse(body);
+    if (!isRecord(parsed)) return body;
+    const quote = typeof parsed.quote_span === 'string' ? `引用: ${parsed.quote_span}` : '';
+    const text = typeof parsed.response_text === 'string' ? `整理: ${parsed.response_text}` : '';
+    return [quote, text].filter(Boolean).join(' / ') || body;
+  } catch {
+    return body;
+  }
 }
 
 function numberFrom(value: unknown): number | undefined {
