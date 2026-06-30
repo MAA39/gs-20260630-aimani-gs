@@ -6,6 +6,7 @@ import {
   normalizeVisibility,
   updateConsultationStatus,
 } from '@aimani-gs/db';
+import type { ConsultationDetail, Message, ReportShareTarget } from '@aimani-gs/contracts';
 import {
   createConsultationWithInitialMessageAndQueuedRun,
   insertHumanMessageWithQueuedRun,
@@ -18,7 +19,8 @@ import { getSessionResult, resolveAuthBaseURL } from '../auth.ts';
 import { jsonBodyLimit, BODY_LIMITS } from '../middleware/body-limit.ts';
 
 const AI_MODEL = '@cf/openai/gpt-oss-120b';
-const PROMPT_VERSION = 'initial-v1';
+const PROMPT_VERSION = 'phase2-chat-v1';
+const MAX_HUMAN_TURNS = 20;
 
 type Bindings = {
   DB: D1Database;
@@ -125,7 +127,7 @@ async function dispatchWithRunLifecycle(
   }
 
   try {
-    const response = await agent.fetch(
+    const agentResponse = await agent.fetch(
       new Request('http://agent/workflows/generate-replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -144,7 +146,7 @@ async function dispatchWithRunLifecycle(
               authorType: m.author_type,
               body: m.body,
             })),
-            replyCount: 3,
+            replyCount: 1,
             promptVersion: PROMPT_VERSION,
             stage: ctx.aiRun.stage,
           },
@@ -153,9 +155,9 @@ async function dispatchWithRunLifecycle(
     );
 
     try {
-      if (!response.ok) throw new Error(`Workflow dispatch failed with ${response.status}`);
+      if (!agentResponse.ok) throw new Error(`Workflow dispatch failed with ${agentResponse.status}`);
     } finally {
-      await response.body?.cancel().catch(() => undefined);
+      await agentResponse.body?.cancel().catch(() => undefined);
     }
   } catch (error) {
     const run = await getAiRunById(
@@ -195,6 +197,65 @@ function authErrorResponse(session: Awaited<ReturnType<typeof getSessionForReque
   return { body: { error: 'authentication required' }, status: 401 } as const;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeShareTarget(value: unknown): ReportShareTarget | null {
+  return value === 'tutor' || value === 'mentor' ? value : null;
+}
+
+function humanTurnCount(messages: Message[]): number {
+  return messages.filter((message) => message.author_type !== 'ai').length;
+}
+
+function visibleMessageBody(message: Message): string {
+  if (message.author_type !== 'ai') return message.body;
+  try {
+    const parsed = JSON.parse(message.body);
+    if (!isRecord(parsed)) return message.body;
+    const quote = typeof parsed.quote_span === 'string' ? `引用: ${parsed.quote_span}` : '';
+    const text = typeof parsed.response_text === 'string' ? parsed.response_text : '';
+    return [quote, text].filter(Boolean).join('\n');
+  } catch {
+    return message.body;
+  }
+}
+
+function buildPersonalReport(detail: ConsultationDetail): string {
+  const lines = detail.messages
+    .sort((a, b) => a.message_number - b.message_number)
+    .map((message) => `${message.author_type === 'ai' ? 'AI' : '受講生'}: ${visibleMessageBody(message)}`)
+    .join('\n');
+
+  return [
+    `# ${detail.title}`,
+    '',
+    '## 困っていること',
+    detail.body,
+    '',
+    '## 対話から見えた材料',
+    lines || 'まだ材料が少ない状態です。',
+    '',
+    '## 次に選べそうなこと',
+    '- もう少しAIと整理する',
+    '- チューターに相談する',
+    '- メンターに相談する',
+  ].join('\n');
+}
+
+function buildSharedReport(personalReport: string, target: ReportShareTarget): string {
+  const targetLabel = target === 'tutor' ? 'チューター' : 'メンター';
+  return [
+    `# ${targetLabel}に相談したいこと`,
+    '',
+    personalReport,
+    '',
+    '## 相談したいこと',
+    '- どこから整理するとよさそうか一緒に確認したいです。',
+  ].join('\n');
+}
+
 export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
   .get('/', async (context) => {
     const { viewer } = await getViewer(context);
@@ -206,6 +267,42 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
     if (!detail) return context.json({ error: 'not found' }, 404);
     return context.json(detail);
   })
+  .get('/:id/shared', async (context) => {
+    const session = await getSessionForRequest(context);
+    const authError = authErrorResponse(session);
+    if (authError) return context.json(authError.body, authError.status);
+
+    const role = await getUserRole(context.env.DB, session.user.id);
+    const row = await context.env.DB.prepare(
+      [
+        'SELECT id, user_id, title, shared_report, shared_with, shared_at',
+        'FROM consultations',
+        'WHERE id = ?',
+      ].join(' '),
+    ).bind(context.req.param('id')).first<{
+      id: string;
+      user_id: string;
+      title: string;
+      shared_report: string | null;
+      shared_with: ReportShareTarget | null;
+      shared_at: string | null;
+    }>();
+
+    if (!row || !row.shared_report || !row.shared_with || !row.shared_at) {
+      return context.json({ error: 'not found' }, 404);
+    }
+    if (row.user_id !== session.user.id && row.shared_with !== role) {
+      return context.json({ error: 'not found' }, 404);
+    }
+
+    return context.json({
+      id: row.id,
+      title: row.title,
+      shared_report: row.shared_report,
+      shared_with: row.shared_with,
+      shared_at: row.shared_at,
+    });
+  })
   .post('/', jsonBodyLimit(BODY_LIMITS.publicLarge), async (context) => {
     const session = await getSessionForRequest(context);
     const authError = authErrorResponse(session);
@@ -214,20 +311,20 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
     const input = await context.req.json<Record<string, unknown>>().catch(() => null);
     if (!input || typeof input !== 'object') return context.json({ error: 'invalid JSON body' }, 400);
 
-    const ALLOWED_FIELDS = new Set(['title', 'body', 'visibility']);
-    const unexpected = Object.keys(input).filter((k) => !ALLOWED_FIELDS.has(k));
+    const allowedFields = new Set(['title', 'body', 'visibility']);
+    const unexpected = Object.keys(input).filter((key) => !allowedFields.has(key));
     if (unexpected.length > 0) return context.json({ error: `unexpected fields: ${unexpected.join(', ')}` }, 400);
 
-    const { title, body } = input;
+    const body = input.body;
+    const rawTitle = input.title;
     const visibility = normalizeVisibility(input.visibility ?? 'private');
-    if (typeof title !== 'string' || typeof body !== 'string') {
-      return context.json({ error: 'title and body must be strings' }, 400);
-    }
+    if (typeof body !== 'string') return context.json({ error: 'body must be a string' }, 400);
+    if (rawTitle !== undefined && typeof rawTitle !== 'string') return context.json({ error: 'title must be a string' }, 400);
     if (!visibility) return context.json({ error: 'visibility is invalid' }, 400);
 
-    const trimmedTitle = title.trim();
     const trimmedBody = body.trim();
-    if (!trimmedTitle || !trimmedBody) return context.json({ error: 'title and body must not be empty' }, 400);
+    const trimmedTitle = (rawTitle?.trim() || trimmedBody.slice(0, 40) || '新しい相談').trim();
+    if (!trimmedBody) return context.json({ error: 'body must not be empty' }, 400);
 
     const consultationId = crypto.randomUUID();
     const messageId = crypto.randomUUID();
@@ -276,11 +373,14 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
       role,
     });
     if (!readable) return context.json({ error: 'not found' }, 404);
+    if (humanTurnCount(readable.messages) >= MAX_HUMAN_TURNS) {
+      return context.json({ error: 'turn limit reached' }, 409);
+    }
 
     const raw = await context.req.json<unknown>().catch(() => null);
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return context.json({ error: 'invalid payload' }, 400);
     const record = raw as Record<string, unknown>;
-    const extraKeys = Object.keys(record).filter((k) => k !== 'body');
+    const extraKeys = Object.keys(record).filter((key) => key !== 'body');
     if (extraKeys.length > 0) return context.json({ error: 'server-owned fields are not allowed' }, 400);
     if (typeof record.body !== 'string' || !record.body.trim()) {
       return context.json({ error: 'body must be a non-empty string' }, 400);
@@ -319,6 +419,53 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
 
     return context.json({ id: messageId, message_number: messageNumber, ai_run: { id: aiRunId } }, 201);
   })
+  .post('/:id/reports', jsonBodyLimit(BODY_LIMITS.publicLarge), async (context) => {
+    const consultationId = context.req.param('id');
+    const session = await getSessionForRequest(context);
+    const authError = authErrorResponse(session);
+    if (authError) return context.json(authError.body, authError.status);
+
+    const detail = await getConsultationDetail(context.env.DB, consultationId, { userId: session.user.id, role: 'student' });
+    if (!detail || detail.user_id !== session.user.id) return context.json({ error: 'not found' }, 404);
+
+    const raw = await context.req.json<unknown>().catch(() => ({}));
+    const record = isRecord(raw) ? raw : {};
+    const target = normalizeShareTarget(record.shared_with);
+    const personalReport = typeof record.personal_report === 'string' && record.personal_report.trim()
+      ? record.personal_report.trim()
+      : detail.personal_report || buildPersonalReport(detail);
+    const sharedReport = target
+      ? (typeof record.shared_report === 'string' && record.shared_report.trim()
+          ? record.shared_report.trim()
+          : detail.shared_report || buildSharedReport(personalReport, target))
+      : null;
+    const shareNow = record.share_now === true && target && sharedReport;
+
+    await context.env.DB.prepare(
+      [
+        'UPDATE consultations',
+        'SET personal_report = ?, shared_report = ?, shared_with = ?,',
+        `shared_at = CASE WHEN ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE NULL END,`,
+        `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+        'WHERE id = ? AND user_id = ?',
+      ].join(' '),
+    ).bind(
+      personalReport,
+      sharedReport,
+      target,
+      shareNow ? 1 : 0,
+      consultationId,
+      session.user.id,
+    ).run();
+
+    return context.json({
+      id: consultationId,
+      personal_report: personalReport,
+      shared_report: sharedReport,
+      shared_with: target,
+      shared_at: shareNow ? 'shared' : null,
+    });
+  })
   .patch('/:id', jsonBodyLimit(BODY_LIMITS.publicSmall), async (context) => {
     const consultationId = context.req.param('id');
     const session = await getSessionForRequest(context);
@@ -328,7 +475,7 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
     const raw = await context.req.json<unknown>().catch(() => null);
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return context.json({ error: 'invalid payload' }, 400);
     const record = raw as Record<string, unknown>;
-    const extraKeys = Object.keys(record).filter((k) => k !== 'status');
+    const extraKeys = Object.keys(record).filter((key) => key !== 'status');
     if (extraKeys.length > 0) return context.json({ error: 'server-owned fields are not allowed' }, 400);
     const status = record.status;
     if (status !== 'open' && status !== 'resolved') return context.json({ error: 'status must be open or resolved' }, 400);
