@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { createServerFn } from '@tanstack/react-start';
 import { useCallback, useMemo, useState } from 'react';
-import type { ConsultationDetail, Message, ReportShareTarget } from '@aimani-gs/contracts';
+import type { ConsultationDetail, ReportShareTarget } from '@aimani-gs/contracts';
 import { ReportEditor } from '../../../components/ReportEditor';
 import { getAuthenticatedApi } from '../../../lib/api-fetch';
 
@@ -96,46 +96,43 @@ function ReportPage() {
 }
 
 function buildPersonalReport(detail: ConsultationDetail): string {
-  const lines = detail.messages
-    .sort((a, b) => a.message_number - b.message_number)
-    .map((message) => `${message.author_type === 'ai' ? 'AI' : '受講生'}: ${formatMessageBody(message)}`)
-    .join('\n');
+  const aiInsights = detail.messages
+    .filter((message) => message.author_type === 'ai')
+    .map((message) => {
+      try {
+        const parsed = JSON.parse(message.body) as { quote_span?: unknown; response_text?: unknown };
+        const quote = typeof parsed.quote_span === 'string' && parsed.quote_span.trim()
+          ? `> ${parsed.quote_span.trim()}`
+          : '';
+        const text = typeof parsed.response_text === 'string' ? parsed.response_text.trim() : '';
+        return [quote, text].filter(Boolean).join('\n');
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean);
+
   return [
     `# ${detail.title}`,
     '',
     '## 困っていること',
     detail.body,
     '',
-    '## 対話で出た材料',
-    lines || 'まだ材料が少ない状態です。',
-    '',
-    '## 次に選べそうなこと',
-    '- もう少しAIと整理する',
-    '- チューターに相談する',
-    '- メンターに相談する',
+    '## 整理で見えてきたこと',
+    aiInsights.join('\n\n') || 'まだ材料が少ない状態です。',
   ].join('\n');
 }
 
 function buildSharedReport(personalReport: string, target: ReportShareTarget): string {
   const targetLabel = target === 'tutor' ? 'チューター' : 'メンター';
+  const bodyMatch = personalReport.match(/## 困っていること\n([\s\S]*?)(?=\n##|$)/);
+  const bodyText = bodyMatch?.[1]?.trim() || '';
   return [
     `# ${targetLabel}に相談したいこと`,
     '',
-    personalReport,
+    bodyText || '（概要を入力してください）',
     '',
     '## 相談したいこと',
-    '- どこから整理するとよさそうか一緒に確認したいです。',
+    '- （ここを編集してください）',
   ].join('\n');
-}
-
-function formatMessageBody(message: Message): string {
-  if (message.author_type !== 'ai') return message.body;
-  try {
-    const parsed = JSON.parse(message.body) as { quote_span?: string; response_text?: string };
-    return [parsed.quote_span ? `引用: ${parsed.quote_span}` : '', parsed.response_text ?? '']
-      .filter(Boolean)
-      .join(' / ') || message.body;
-  } catch {
-    return message.body;
-  }
 }
