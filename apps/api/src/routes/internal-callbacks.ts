@@ -32,10 +32,9 @@ const SAFE_ERROR_MESSAGES: Record<string, string> = {
 };
 
 const PROTOCOL_VERSION = '1';
-const MIN_REPLY_COUNT = 1;
-const MAX_REPLY_COUNT = 5;
-const MIN_REPLY_LENGTH = 1;
-const MAX_REPLY_LENGTH = 500;
+const AI_MESSAGE_COUNT = 1;
+const MIN_AI_MESSAGE_LENGTH = 1;
+const MAX_AI_MESSAGE_LENGTH = 12_000;
 const HEX_HASH_PATTERN = /^[0-9a-f]{64}$/u;
 
 function verifyCallbackKey(requestKey: string | undefined, expectedKey: string): boolean {
@@ -67,6 +66,37 @@ async function computeHash(content: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function validateAiTurnBody(body: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return 'invalid payload: AI message body must be JSON';
+  }
+  if (!isRecord(parsed)) return 'invalid payload: AI message body must be an object';
+  if (typeof parsed.quote_span !== 'string' || !parsed.quote_span.trim()) {
+    return 'invalid payload: quote_span required';
+  }
+  if (typeof parsed.response_text !== 'string' || !parsed.response_text.trim()) {
+    return 'invalid payload: response_text required';
+  }
+  if (!Array.isArray(parsed.questions) || parsed.questions.length < 1) {
+    return 'invalid payload: questions required';
+  }
+  for (const question of parsed.questions) {
+    if (!isRecord(question) || typeof question.question !== 'string' || !question.question.trim()) {
+      return 'invalid payload: question text required';
+    }
+    if (!Array.isArray(question.options) || question.options.length < 3 || question.options.length > 4) {
+      return 'invalid payload: each question requires 3-4 options';
+    }
+    if (!question.options.every((option) => typeof option === 'string' && option.trim())) {
+      return 'invalid payload: all options must be non-empty strings';
+    }
+  }
+  return null;
 }
 
 export const internalCallbackRoutes = new Hono<{ Bindings: Bindings }>()
@@ -122,24 +152,24 @@ export const internalCallbackRoutes = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: 'invalid payload: resultHash must be 64-char hex string' }, 400);
     }
 
-    if (!Array.isArray(raw.replies) || raw.replies.length < MIN_REPLY_COUNT || raw.replies.length > MAX_REPLY_COUNT) {
-      return c.json({ error: `invalid payload: ${MIN_REPLY_COUNT}-${MAX_REPLY_COUNT} replies required` }, 400);
-    }
-    const normalizedBodies: string[] = [];
-    for (const reply of raw.replies) {
-      if (!isRecord(reply) || typeof reply.body !== 'string') {
-        return c.json({ error: 'invalid payload: each reply must have a body string' }, 400);
-      }
-      const trimmed = reply.body.trim();
-      if (trimmed.length < MIN_REPLY_LENGTH || trimmed.length > MAX_REPLY_LENGTH) {
-        return c.json({ error: `invalid payload: reply body must be ${MIN_REPLY_LENGTH}-${MAX_REPLY_LENGTH} chars after trim` }, 400);
-      }
-      normalizedBodies.push(trimmed);
+    if (!Array.isArray(raw.messages) || raw.messages.length !== AI_MESSAGE_COUNT) {
+      return c.json({ error: 'invalid payload: exactly one AI message required' }, 400);
     }
 
-    const expectedHash = await computeHash(JSON.stringify(normalizedBodies));
+    const firstMessage = raw.messages[0];
+    if (!isRecord(firstMessage) || typeof firstMessage.body !== 'string') {
+      return c.json({ error: 'invalid payload: message body string required' }, 400);
+    }
+    const body = firstMessage.body.trim();
+    if (body.length < MIN_AI_MESSAGE_LENGTH || body.length > MAX_AI_MESSAGE_LENGTH) {
+      return c.json({ error: `invalid payload: message body must be ${MIN_AI_MESSAGE_LENGTH}-${MAX_AI_MESSAGE_LENGTH} chars after trim` }, 400);
+    }
+    const validationError = validateAiTurnBody(body);
+    if (validationError) return c.json({ error: validationError }, 400);
+
+    const expectedHash = await computeHash(body);
     if (raw.resultHash !== expectedHash) {
-      return c.json({ error: 'invalid payload: resultHash does not match reply content' }, 400);
+      return c.json({ error: 'invalid payload: resultHash does not match message content' }, 400);
     }
 
     if (raw.usage !== undefined) {
@@ -165,7 +195,7 @@ export const internalCallbackRoutes = new Hono<{ Bindings: Bindings }>()
         aiRunId,
         resultHash: raw.resultHash as string,
         completedEventId: crypto.randomUUID(),
-        replies: normalizedBodies.map((body) => ({ messageId: crypto.randomUUID(), body })),
+        replies: [{ messageId: crypto.randomUUID(), body }],
         usage,
       });
       return c.json({ ok: true, duplicate: result.duplicate, messageIds: result.messageIds });
