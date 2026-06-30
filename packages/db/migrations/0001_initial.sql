@@ -1,19 +1,23 @@
 -- G's版MVPアイマニ 初期スキーマ
--- bs-job-board の AI run lifecycle / SSE / Better Auth テーブルを Consultation/Message に移植
+-- AI run lifecycle / SSE / Better Auth / report fields
 
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS consultations (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL,
-  title      TEXT NOT NULL,
-  body       TEXT NOT NULL,
-  visibility TEXT NOT NULL DEFAULT 'private'
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  body            TEXT NOT NULL,
+  visibility      TEXT NOT NULL DEFAULT 'private'
     CHECK (visibility IN ('private', 'tutor', 'mentor', 'public')),
-  status     TEXT NOT NULL DEFAULT 'open'
+  status          TEXT NOT NULL DEFAULT 'open'
     CHECK (status IN ('open', 'resolved')),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  personal_report TEXT,
+  shared_report   TEXT,
+  shared_with     TEXT CHECK (shared_with IS NULL OR shared_with IN ('tutor', 'mentor')),
+  shared_at       TEXT,
+  created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -122,6 +126,7 @@ CREATE TABLE IF NOT EXISTS "verification" (
 
 CREATE INDEX IF NOT EXISTS idx_consultations_user_created ON consultations(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_consultations_visibility_created ON consultations(visibility, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultations_shared_with ON consultations(shared_with, shared_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_consultation_number ON messages(consultation_id, message_number);
 CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_message_id);
 CREATE INDEX IF NOT EXISTS idx_ai_runs_consultation_created ON ai_runs(consultation_id, created_at DESC);
