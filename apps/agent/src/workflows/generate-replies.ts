@@ -307,7 +307,7 @@ function decodeSessionTurnOutput(textValue: string):
     if (question.length > MAX_QUESTION_LENGTH) issues.push('question text too long');
     if (options.length !== rawOptions.length) issues.push('all options must be strings');
     if (options.length < MIN_OPTION_COUNT || options.length > MAX_OPTION_COUNT) {
-      issues.push(`options length must be ${MIN_QUESTION_COUNT}-${MAX_OPTION_COUNT}`);
+      issues.push(`options length must be ${MIN_OPTION_COUNT}-${MAX_OPTION_COUNT}`);
     }
     if (options.some((option) => option.length > MAX_OPTION_LENGTH)) issues.push('option text too long');
     questions.push({ question, options });
