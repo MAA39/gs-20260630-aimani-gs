@@ -8,13 +8,13 @@ import type {
   Message,
 } from '@aimani-gs/contracts';
 import { useAiRunProgress, getProgressLabel } from '../lib/use-ai-run-progress';
-import { getApi, getAuthenticatedApi } from '../lib/api-fetch';
+import { getAuthenticatedApi } from '../lib/api-fetch';
 import { signInWithGitHub } from '../lib/auth-client';
 
 const fetchDetail = createServerFn({ method: 'GET' })
   .validator((input: { id: string }) => input)
   .handler(async ({ data }) => {
-    const api = await getApi();
+    const api = await getAuthenticatedApi();
     const r = await api(`/api/v1/consultations/${data.id}`);
     if (!r.ok) throw new Error('not found');
     return (await r.json()) as ConsultationDetail;
