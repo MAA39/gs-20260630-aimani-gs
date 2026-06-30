@@ -1,4 +1,4 @@
-// aimani-gs データモデル型定義
+// aimani-gs データモデル・API境界型定義
 
 /** ユーザーロール */
 export type UserRole = 'student' | 'tutor' | 'mentor';
@@ -36,6 +36,7 @@ export type Message = {
   author_type: AuthorType;
   author_id: string | null; // AIの場合null
   body: string;
+  parent_message_id: string | null;
   created_at: string;
 };
 
@@ -56,3 +57,54 @@ export type ApiError = { error: string };
 
 /** 相談詳細（メッセージ付き） */
 export type ConsultationDetail = Consultation & { messages: Message[] };
+
+/** 相談作成レスポンス */
+export type CreateConsultationResponse = {
+  id: string;
+  title: string;
+  ai_run: { id: string };
+};
+
+/** メッセージ作成レスポンス */
+export type CreateMessageResponse = {
+  id: string;
+  message_number: number;
+  ai_run: { id: string };
+};
+
+// ── AI run SSE ──────────────────────────────────────────
+
+/** 公開境界で許可する error code。runtime 配列から型を導出。 */
+export const PUBLIC_AI_ERROR_CODES = [
+  'AI_CONFIGURATION_ERROR',
+  'AI_PROVIDER_TIMEOUT',
+  'AI_OUTPUT_INVALID',
+  'AI_INPUT_INVALID',
+  'AI_RUN_FAILED',
+  'AI_DISPATCH_FAILED',
+  'AI_EVENT_INVALID',
+] as const;
+
+export type PublicAiErrorCode = (typeof PUBLIC_AI_ERROR_CODES)[number];
+
+const publicAiErrorCodeSet = new Set<PublicAiErrorCode>(PUBLIC_AI_ERROR_CODES);
+
+export function isPublicAiErrorCode(value: unknown): value is PublicAiErrorCode {
+  return typeof value === 'string' && publicAiErrorCodeSet.has(value as PublicAiErrorCode);
+}
+
+/** 公開SSEで配信する allow-list 済みイベント */
+export type PublicAiRunEvent =
+  | { status: 'queued' | 'admitted' | 'generating' | 'repairing' }
+  | { status: 'completed'; message_ids: readonly string[] }
+  | { status: 'failed'; error_code: PublicAiErrorCode };
+
+/** useAiRunProgress の状態。connection_failed は Web 専用。 */
+export type AiRunProgress =
+  | { status: 'idle' }
+  | { status: 'connecting' }
+  | { status: 'reconnecting' }
+  | { status: 'connection_failed' }
+  | { status: 'queued' | 'admitted' | 'generating' | 'repairing' }
+  | { status: 'completed'; messageIds: readonly string[] }
+  | { status: 'failed'; errorCode: PublicAiErrorCode };
