@@ -1,10 +1,23 @@
 {
   "name": "@aimani-gs/agent",
-  "version": "0.0.1",
   "private": true,
+  "version": "0.0.1",
+  "type": "module",
   "scripts": {
     "dev": "flue dev",
+    "build": "flue build --target cloudflare",
     "deploy": "flue deploy",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@flue/runtime": "1.0.0-beta.2",
+    "agents": "^0.16.2",
+    "hono": "^4.12.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "@flue/cli": "1.0.0-beta.1",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.0.0"
   }
 }
