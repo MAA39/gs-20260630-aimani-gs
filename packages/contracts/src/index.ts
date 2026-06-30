@@ -5,10 +5,10 @@ export type UserRole = 'student' | 'tutor' | 'mentor';
 
 /** 相談の公開範囲 */
 export type ConsultationVisibility =
-  | 'private'     // 自分だけ
-  | 'tutor'       // 指定チューターに共有
-  | 'mentor'      // 指定メンターに共有
-  | 'public';     // 全体公開
+  | 'private'
+  | 'tutor'
+  | 'mentor'
+  | 'public';
 
 /** 相談ステータス */
 export type ConsultationStatus = 'open' | 'resolved';
@@ -16,7 +16,22 @@ export type ConsultationStatus = 'open' | 'resolved';
 /** メッセージの発信者種別 */
 export type AuthorType = 'student' | 'tutor' | 'mentor' | 'ai';
 
-/** 相談（旧thread） */
+export type ReportShareTarget = 'tutor' | 'mentor';
+
+/** AIが1ターンで返す質問と選択肢 */
+export type QuestionWithOptions = {
+  question: string;
+  options: string[];
+};
+
+/** AIが1ターンで返す構造化出力。author_type='ai' の messages.body にJSON文字列で保存する。 */
+export type SessionTurnOutput = {
+  quote_span: string;
+  response_text: string;
+  questions: QuestionWithOptions[];
+};
+
+/** 相談 */
 export type Consultation = {
   id: string;
   user_id: string;
@@ -24,17 +39,21 @@ export type Consultation = {
   body: string;
   visibility: ConsultationVisibility;
   status: ConsultationStatus;
+  personal_report: string | null;
+  shared_report: string | null;
+  shared_with: ReportShareTarget | null;
+  shared_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-/** メッセージ（旧post） */
+/** メッセージ */
 export type Message = {
   id: string;
   consultation_id: string;
   message_number: number;
   author_type: AuthorType;
-  author_id: string | null; // AIの場合null
+  author_id: string | null;
   body: string;
   parent_message_id: string | null;
   created_at: string;
@@ -42,7 +61,7 @@ export type Message = {
 
 /** 相談作成入力 */
 export type CreateConsultationInput = {
-  title: string;
+  title?: string;
   body: string;
   visibility: ConsultationVisibility;
 };
@@ -70,6 +89,21 @@ export type CreateMessageResponse = {
   id: string;
   message_number: number;
   ai_run: { id: string };
+};
+
+export type SaveReportInput = {
+  personal_report: string;
+  shared_report?: string | null;
+  shared_with?: ReportShareTarget | null;
+  share_now?: boolean;
+};
+
+export type SharedReportView = {
+  id: string;
+  title: string;
+  shared_report: string;
+  shared_with: ReportShareTarget;
+  shared_at: string | null;
 };
 
 // ── AI run SSE ──────────────────────────────────────────
