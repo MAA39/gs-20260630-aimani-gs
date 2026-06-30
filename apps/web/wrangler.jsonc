@@ -1,0 +1,16 @@
+{
+  "$schema": "https://workers.cloudflare.com/schema/wrangler.json",
+  "name": "aimani-gs-web",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "@tanstack/react-start/server-entry",
+  "services": [
+    {
+      "binding": "API",
+      "service": "aimani-gs-api"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
