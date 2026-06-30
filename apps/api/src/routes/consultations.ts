@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import {
   getConsultationDetail,
+  getSharedReport,
   getUserRole,
   listVisibleConsultations,
   normalizeVisibility,
@@ -209,24 +210,23 @@ function humanTurnCount(messages: Message[]): number {
   return messages.filter((message) => message.author_type !== 'ai').length;
 }
 
-function visibleMessageBody(message: Message): string {
-  if (message.author_type !== 'ai') return message.body;
-  try {
-    const parsed = JSON.parse(message.body);
-    if (!isRecord(parsed)) return message.body;
-    const quote = typeof parsed.quote_span === 'string' ? `引用: ${parsed.quote_span}` : '';
-    const text = typeof parsed.response_text === 'string' ? parsed.response_text : '';
-    return [quote, text].filter(Boolean).join('\n');
-  } catch {
-    return message.body;
-  }
-}
-
 function buildPersonalReport(detail: ConsultationDetail): string {
-  const lines = detail.messages
-    .sort((a, b) => a.message_number - b.message_number)
-    .map((message) => `${message.author_type === 'ai' ? 'AI' : '受講生'}: ${visibleMessageBody(message)}`)
-    .join('\n');
+  const aiInsights = detail.messages
+    .filter((message) => message.author_type === 'ai')
+    .map((message) => {
+      try {
+        const parsed = JSON.parse(message.body);
+        if (!isRecord(parsed)) return '';
+        const quote = typeof parsed.quote_span === 'string' && parsed.quote_span.trim()
+          ? `> ${parsed.quote_span.trim()}`
+          : '';
+        const text = typeof parsed.response_text === 'string' ? parsed.response_text.trim() : '';
+        return [quote, text].filter(Boolean).join('\n');
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean);
 
   return [
     `# ${detail.title}`,
@@ -234,25 +234,22 @@ function buildPersonalReport(detail: ConsultationDetail): string {
     '## 困っていること',
     detail.body,
     '',
-    '## 対話から見えた材料',
-    lines || 'まだ材料が少ない状態です。',
-    '',
-    '## 次に選べそうなこと',
-    '- もう少しAIと整理する',
-    '- チューターに相談する',
-    '- メンターに相談する',
+    '## 整理で見えてきたこと',
+    aiInsights.join('\n\n') || 'まだ材料が少ない状態です。',
   ].join('\n');
 }
 
 function buildSharedReport(personalReport: string, target: ReportShareTarget): string {
   const targetLabel = target === 'tutor' ? 'チューター' : 'メンター';
+  const bodyMatch = personalReport.match(/## 困っていること\n([\s\S]*?)(?=\n##|$)/);
+  const bodyText = bodyMatch?.[1]?.trim() || '';
   return [
     `# ${targetLabel}に相談したいこと`,
     '',
-    personalReport,
+    bodyText || '（概要を入力してください）',
     '',
     '## 相談したいこと',
-    '- どこから整理するとよさそうか一緒に確認したいです。',
+    '- （ここを編集してください）',
   ].join('\n');
 }
 
@@ -273,35 +270,13 @@ export const consultationRoutes = new Hono<{ Bindings: Bindings }>()
     if (authError) return context.json(authError.body, authError.status);
 
     const role = await getUserRole(context.env.DB, session.user.id);
-    const row = await context.env.DB.prepare(
-      [
-        'SELECT id, user_id, title, shared_report, shared_with, shared_at',
-        'FROM consultations',
-        'WHERE id = ?',
-      ].join(' '),
-    ).bind(context.req.param('id')).first<{
-      id: string;
-      user_id: string;
-      title: string;
-      shared_report: string | null;
-      shared_with: ReportShareTarget | null;
-      shared_at: string | null;
-    }>();
-
-    if (!row || !row.shared_report || !row.shared_with || !row.shared_at) {
-      return context.json({ error: 'not found' }, 404);
-    }
-    if (row.user_id !== session.user.id && row.shared_with !== role) {
-      return context.json({ error: 'not found' }, 404);
-    }
-
-    return context.json({
-      id: row.id,
-      title: row.title,
-      shared_report: row.shared_report,
-      shared_with: row.shared_with,
-      shared_at: row.shared_at,
+    const sharedReport = await getSharedReport(context.env.DB, context.req.param('id'), {
+      userId: session.user.id,
+      role,
     });
+    if (!sharedReport) return context.json({ error: 'not found' }, 404);
+
+    return context.json(sharedReport);
   })
   .post('/', jsonBodyLimit(BODY_LIMITS.publicLarge), async (context) => {
     const session = await getSessionForRequest(context);
