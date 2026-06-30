@@ -1,0 +1,10 @@
+{
+  "name": "@aimani-gs/agent",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "flue dev",
+    "deploy": "flue deploy",
+    "typecheck": "tsc --noEmit"
+  }
+}
