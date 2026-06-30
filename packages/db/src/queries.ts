@@ -4,6 +4,8 @@ import type {
   ConsultationStatus,
   ConsultationVisibility,
   Message,
+  ReportShareTarget,
+  SharedReportView,
   UserRole,
 } from '@aimani-gs/contracts';
 
@@ -73,6 +75,41 @@ export async function getConsultationDetail(
     .all<Message>();
 
   return { ...consultation, messages: messages.results };
+}
+
+export async function getSharedReport(
+  db: D1Database,
+  consultationId: string,
+  viewer: { userId: string; role: UserRole },
+): Promise<SharedReportView | null> {
+  const row = await db
+    .prepare(
+      [
+        'SELECT id, user_id, title, shared_report, shared_with, shared_at',
+        'FROM consultations',
+        'WHERE id = ?',
+      ].join(' '),
+    )
+    .bind(consultationId)
+    .first<{
+      id: string;
+      user_id: string;
+      title: string;
+      shared_report: string | null;
+      shared_with: ReportShareTarget | null;
+      shared_at: string | null;
+    }>();
+
+  if (!row || !row.shared_report || !row.shared_with || !row.shared_at) return null;
+  if (row.user_id !== viewer.userId && row.shared_with !== viewer.role) return null;
+
+  return {
+    id: row.id,
+    title: row.title,
+    shared_report: row.shared_report,
+    shared_with: row.shared_with,
+    shared_at: row.shared_at,
+  };
 }
 
 export async function updateConsultationStatus(
