@@ -1,5 +1,19 @@
 {
   "name": "@aimani-gs/db",
   "version": "0.0.1",
-  "private": true
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ai-pipeline": "./src/ai-pipeline.ts"
+  },
+  "dependencies": {
+    "@aimani-gs/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "typescript": "^5.8.0"
+  }
 }
