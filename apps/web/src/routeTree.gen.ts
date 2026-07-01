@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatNewRouteImport } from './routes/chat/new'
 import { Route as ChatIdRouteImport } from './routes/chat/$id'
-import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ChatIdSharedRouteImport } from './routes/chat/$id/shared'
 import { Route as ChatIdReportRouteImport } from './routes/chat/$id/report'
 
@@ -31,11 +30,6 @@ const ChatIdRoute = ChatIdRouteImport.update({
   path: '/chat/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSplatRoute = ApiSplatRouteImport.update({
-  id: '/api/$',
-  path: '/api/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ChatIdSharedRoute = ChatIdSharedRouteImport.update({
   id: '/shared',
   path: '/shared',
@@ -49,7 +43,6 @@ const ChatIdReportRoute = ChatIdReportRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/$': typeof ApiSplatRoute
   '/chat/$id': typeof ChatIdRouteWithChildren
   '/chat/new': typeof ChatNewRoute
   '/chat/$id/report': typeof ChatIdReportRoute
@@ -57,7 +50,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/$': typeof ApiSplatRoute
   '/chat/$id': typeof ChatIdRouteWithChildren
   '/chat/new': typeof ChatNewRoute
   '/chat/$id/report': typeof ChatIdReportRoute
@@ -66,7 +58,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/$': typeof ApiSplatRoute
   '/chat/$id': typeof ChatIdRouteWithChildren
   '/chat/new': typeof ChatNewRoute
   '/chat/$id/report': typeof ChatIdReportRoute
@@ -75,24 +66,12 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/api/$'
-    | '/chat/$id'
-    | '/chat/new'
-    | '/chat/$id/report'
-    | '/chat/$id/shared'
+    '/' | '/chat/$id' | '/chat/new' | '/chat/$id/report' | '/chat/$id/shared'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/api/$'
-    | '/chat/$id'
-    | '/chat/new'
-    | '/chat/$id/report'
-    | '/chat/$id/shared'
+  to: '/' | '/chat/$id' | '/chat/new' | '/chat/$id/report' | '/chat/$id/shared'
   id:
     | '__root__'
     | '/'
-    | '/api/$'
     | '/chat/$id'
     | '/chat/new'
     | '/chat/$id/report'
@@ -101,7 +80,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiSplatRoute: typeof ApiSplatRoute
   ChatIdRoute: typeof ChatIdRouteWithChildren
   ChatNewRoute: typeof ChatNewRoute
 }
@@ -127,13 +105,6 @@ declare module '@tanstack/react-router' {
       path: '/chat/$id'
       fullPath: '/chat/$id'
       preLoaderRoute: typeof ChatIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/$': {
-      id: '/api/$'
-      path: '/api/$'
-      fullPath: '/api/$'
-      preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat/$id/shared': {
@@ -168,19 +139,9 @@ const ChatIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiSplatRoute: ApiSplatRoute,
   ChatIdRoute: ChatIdRouteWithChildren,
   ChatNewRoute: ChatNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
