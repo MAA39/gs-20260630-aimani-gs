@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "aimani-gs-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "aff38e8b-caeb-4cae-b92c-a3eeb2634bf5"
     }
   ],
   "observability": {

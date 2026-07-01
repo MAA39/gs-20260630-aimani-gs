@@ -1,0 +1,55 @@
+{
+  "name": "aimani-gs-agent",
+  "workers_dev": false,
+  "main": ".flue-vite/_entry.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "no_bundle": true,
+  "rules": [
+    {
+      "type": "ESModule",
+      "globs": [
+        "**/*.js",
+        "**/*.mjs"
+      ]
+    }
+  ],
+  "find_additional_modules": true,
+  "base_dir": "dist/aimani_gs_agent",
+  "observability": {
+    "enabled": true
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "aimani-gs-api"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FLUE_GENERATE_REPLIES_WORKFLOW",
+        "class_name": "FlueGenerateRepliesWorkflow"
+      },
+      {
+        "name": "FLUE_REGISTRY",
+        "class_name": "FlueRegistry"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FlueRegistry",
+        "FlueGenerateRepliesWorkflow"
+      ]
+    }
+  ],
+  "$schema": "https://workers.cloudflare.com/schema/wrangler.json"
+}
