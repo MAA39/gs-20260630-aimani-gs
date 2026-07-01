@@ -2,7 +2,7 @@
   "$schema": "https://workers.cloudflare.com/schema/wrangler.json",
   "name": "aimani-gs-web",
   "compatibility_date": "2026-06-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "assets_navigation_has_no_effect"],
   "main": "@tanstack/react-start/server-entry",
   "assets": {
     "not_found_handling": "none",
