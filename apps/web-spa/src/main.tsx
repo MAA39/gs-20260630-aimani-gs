@@ -1,4 +1,5 @@
 import { StrictMode, useCallback, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Link,
@@ -32,7 +33,7 @@ type ChatInputProps = {
 function ChatInput({ onSubmit, disabled = false, submitLabel = '送信' }: ChatInputProps) {
   const [value, setValue] = useState('');
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const body = value.trim();
     if (!body || disabled) return;
