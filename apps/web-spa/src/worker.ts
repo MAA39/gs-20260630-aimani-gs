@@ -95,6 +95,16 @@ async function proxyApiRequest(request: Request, env: Env, splatPath: string): P
 
   const upstream = await env.API.fetch(upstreamUrl, upstreamInit);
   const headers = buildDownstreamHeaders(upstream);
+  const contentType = upstream.headers.get('content-type') ?? '';
+
+  if (contentType.includes('text/event-stream')) {
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    });
+  }
+
   const body = request.method === 'HEAD' ? null : await upstream.text();
 
   return new Response(body, {
