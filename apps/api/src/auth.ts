@@ -19,6 +19,7 @@ export function createAuth(d1: D1Database, config: AuthRuntimeConfig) {
     baseURL: config.baseURL,
     trustedOrigins: [
       'https://aimani-gs-web.masa-nekoshinshi39.workers.dev',
+      'https://aimani-gs-web-spa.masa-nekoshinshi39.workers.dev',
       'http://localhost:5173',
     ],
     database: {

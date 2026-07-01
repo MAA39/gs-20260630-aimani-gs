@@ -116,6 +116,8 @@ export default {
       return proxyApiRequest(request, env, apiSplatPath);
     }
 
-    return env.ASSETS.fetch(request);
+    // run_worker_first: ["/api", "/api/*"] なので
+    // API以外のパスはWorkerに来ないはずだが、念のためfallback
+    return new Response('Not Found', { status: 404 });
   },
 };
