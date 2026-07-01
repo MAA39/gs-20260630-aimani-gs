@@ -1,5 +1,6 @@
 import { HeadContent, Outlet, Scripts, createRootRoute, Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { authClient } from '../lib/auth-client';
 
 export const Route = createRootRoute({
   head: () => ({
@@ -10,8 +11,29 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootShell,
-  component: () => <Outlet />,
+  component: RootComponent,
 });
+
+function AuthStatus() {
+  const { data: session, isPending } = authClient.useSession();
+  if (isPending) return <span className="auth-status">...</span>;
+  if (!session?.user) return <span className="auth-status auth-status-out">未ログイン</span>;
+  return (
+    <span className="auth-status auth-status-in">
+      <span>{session.user.name || session.user.email || 'ログイン中'}</span>
+      <button type="button" className="auth-logout-btn" onClick={() => authClient.signOut().then(() => window.location.reload())}>ログアウト</button>
+    </span>
+  );
+}
+
+function RootComponent() {
+  return (
+    <>
+      <div className="auth-bar"><AuthStatus /></div>
+      <Outlet />
+    </>
+  );
+}
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
@@ -127,4 +149,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   .category-grid { grid-template-columns: 1fr; }
   .chat-input { grid-template-columns: 1fr; }
 }
+.auth-bar { display: flex; justify-content: flex-end; padding: 6px 16px; background: #20211d; color: #fffaf0; font-size: 13px; }
+.auth-status { display: flex; align-items: center; gap: 10px; }
+.auth-status-out { color: #c4b89a; }
+.auth-status-in { display: flex; align-items: center; gap: 10px; }
+.auth-logout-btn { background: none; border: 1px solid #c4b89a; color: #fffaf0; padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px; }
 `;
