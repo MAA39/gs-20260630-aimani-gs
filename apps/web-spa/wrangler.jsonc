@@ -1,0 +1,20 @@
+{
+  "$schema": "https://workers.cloudflare.com/schema/wrangler.json",
+  "name": "aimani-gs-web-spa",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/worker.ts",
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "aimani-gs-api"
+    }
+  ],
+  "observability": { "enabled": true }
+}
