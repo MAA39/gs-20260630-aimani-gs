@@ -14,6 +14,8 @@
     "@tanstack/react-router": "^1.120.0",
     "@tanstack/react-start": "^1.120.0",
     "better-auth": "^1.6.20",
+    "kysely": "^0.29.2",
+    "kysely-d1": "^0.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
