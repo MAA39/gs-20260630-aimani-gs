@@ -16,6 +16,10 @@ const HOP_BY_HOP = new Set([
   'upgrade',
 ]);
 
+type ProxyRequestInit = RequestInit & {
+  duplex?: 'half';
+};
+
 function buildUpstreamHeaders(incoming: Headers): Headers {
   const out = new Headers();
   incoming.forEach((value, key) => {
@@ -64,14 +68,14 @@ export async function proxyApiRequest(
   upstreamHeaders.set('x-forwarded-host', url.host);
   upstreamHeaders.set('x-forwarded-proto', url.protocol.replace(':', ''));
 
-  const upstreamInit: RequestInit = {
+  const upstreamInit: ProxyRequestInit = {
     method: request.method,
     headers: upstreamHeaders,
+    redirect: 'manual',
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     upstreamInit.body = request.body;
-    // @ts-expect-error -- Cloudflare Workers では duplex: 'half' が必要
     upstreamInit.duplex = 'half';
   }
 

@@ -2,7 +2,9 @@ import { createAuthClient } from 'better-auth/client';
 
 /**
  * Better Auth client — same-origin 設定。
- * Web Worker の /api/* proxy 経由で API Worker の auth handler へ到達する。
+ *
+ * /api/auth/** は Web Worker が直接処理する。
+ * /api/v1/** だけ API Worker へ Service Binding proxy する。
  */
 export const authClient = createAuthClient();
 
