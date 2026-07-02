@@ -8,13 +8,18 @@ on:
         required: true
         default: 'spike/web-direct-auth-2'
         type: string
+      confirm_production_deploy:
+        description: 'Set true to deploy aimani-gs-web. Leave false for validation only.'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
-    name: Deploy aimani-gs-web
+  validate:
+    name: Validate Web Worker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +35,32 @@ jobs:
           node-version: 22
 
       - run: pnpm install --no-frozen-lockfile
+
+      - name: Build Web Worker package
+        run: pnpm --filter @aimani-gs/web build
+
+  deploy:
+    name: Deploy aimani-gs-web
+    runs-on: ubuntu-latest
+    needs: validate
+    if: ${{ inputs.confirm_production_deploy == true }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: pnpm install --no-frozen-lockfile
+
+      - name: Build Web Worker package
+        run: pnpm --filter @aimani-gs/web build
 
       - name: Deploy Web Worker
         working-directory: apps/web
